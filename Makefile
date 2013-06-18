@@ -2,6 +2,8 @@ AUTOTARGETS=hdrboot bootunpack
 TARGETS=$(AUTOTARGETS) mkbootimg
 DEPS = Makefile shared/bootimg.h
 COMMON=
+PREFIX ?= usr/local
+
 
 CC=gcc
 CFLAGS=-I. -Ishared -Isrc -Wall
@@ -19,6 +21,9 @@ sha.o: src/mincrypt/sha.c src/mincrypt/sha.h
 
 mkbootimg: mkbootimg.o sha.o $(COMMON) $(DEPS)
 	$(CC) $(CFLAGS) -o mkbootimg mkbootimg.o sha.o $(COMMON) $(LDFLAGS)
+
+install: $(TARGETS)
+	install -D -m 0755 $(TARGETS) $(DESTDIR)/$(PREFIX)/bin
 
 $(OBJS): %.o: src/%.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
