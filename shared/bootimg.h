@@ -24,6 +24,7 @@ typedef struct boot_img_hdr boot_img_hdr;
 #define BOOT_MAGIC_SIZE 8
 #define BOOT_NAME_SIZE 16
 #define BOOT_ARGS_SIZE 512
+#define RESERVE_LOG_MAGIC 0x474F4C52  //ML,"RLOG" in ascii
 
 struct boot_img_hdr
 {
@@ -47,6 +48,8 @@ struct boot_img_hdr
     unsigned char cmdline[BOOT_ARGS_SIZE];
 
     unsigned id[8]; /* timestamp / checksum / sha1 / etc */
+    unsigned log_buf_magic;  /* physical log buf addr */
+    unsigned log_buf_addr;  /* physical log buf addr */
 };
 
 /*

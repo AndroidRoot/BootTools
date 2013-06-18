@@ -1,6 +1,7 @@
 /* tools/mkbootimg/mkbootimg.c
 **
 ** Copyright 2007, The Android Open Source Project
+** Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -24,6 +25,8 @@
 
 #include "mincrypt/sha.h"
 #include "bootimg.h"
+
+#define ROUND_TO_PAGE(x, y) (((x) + (y)) & (~(y)))
 
 static void *load_file(const char *fn, unsigned *_sz)
 {
@@ -60,10 +63,13 @@ int usage(void)
     fprintf(stderr,"usage: mkbootimg\n"
             "       --kernel <filename>\n"
             "       --ramdisk <filename>\n"
+            "       [ --ramdisk_offset <offset> ]\n"
+            "       [ -z ] \n"
             "       [ --second <2ndbootloader-filename> ]\n"
             "       [ --cmdline <kernel-commandline> ]\n"
             "       [ --board <boardname> ]\n"
             "       [ --base <address> ]\n"
+            "       [ --pagesize <pagesize> ]\n"
             "       -o|--output <filename>\n"
             );
     return 1;
@@ -71,7 +77,7 @@ int usage(void)
 
 
 
-static unsigned char padding[2048] = { 0, };
+static unsigned char padding[4096] = { 0, };
 
 int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 {
@@ -91,10 +97,45 @@ int write_padding(int fd, unsigned pagesize, unsigned itemsize)
     }
 }
 
+int parse_log_addr(char *filename)
+{
+      FILE* fp;
+      char buffer[128];
+      char data[9];
+      char *p;
+      int retValue = 0;
+      int found =0;
+
+      char *subs = "__log_buf";
+      fp=fopen(filename,"r");
+
+   if(fp==NULL)
+       return -1;
+   while ((fgets (buffer, 100, fp)) != NULL){
+       if( p =strstr(buffer, subs)){
+           found = 1;
+           break;
+       }
+   }
+       fclose(fp);
+
+   if(!found)
+       return -1;
+
+   memcpy(data,buffer,8);
+   data[8] = 0;
+
+   sscanf(data,"%x",&retValue);
+
+   return (retValue - 0xc0000000 +0x200000);
+}
+
+
 int main(int argc, char **argv)
 {
     boot_img_hdr hdr;
 
+    char *system_map = 0;
     char *kernel_fn = 0;
     void *kernel_data = 0;
     char *ramdisk_fn = 0;
@@ -108,19 +149,14 @@ int main(int argc, char **argv)
     int fd;
     SHA_CTX ctx;
     uint8_t* sha;
+    unsigned base = 0x10000000;
+    unsigned ramdisk_offset = 0x01300000;
+    int compressed_kernel = 0;
 
     argc--;
     argv++;
 
     memset(&hdr, 0, sizeof(hdr));
-
-        /* default load addresses */
-    hdr.kernel_addr =  0x10008000;
-    hdr.ramdisk_addr = 0x11000000;
-    hdr.second_addr =  0x10F00000;
-    hdr.tags_addr =    0x10000100;
-
-    hdr.page_size = pagesize;
 
     while(argc > 0){
         char *arg = argv[0];
@@ -134,6 +170,8 @@ int main(int argc, char **argv)
             bootimg = val;
         } else if(!strcmp(arg, "--kernel")) {
             kernel_fn = val;
+        } else if(!strcmp(arg, "--systemmap")) {
+            system_map = val;
         } else if(!strcmp(arg, "--ramdisk")) {
             ramdisk_fn = val;
         } else if(!strcmp(arg, "--second")) {
@@ -141,17 +179,27 @@ int main(int argc, char **argv)
         } else if(!strcmp(arg, "--cmdline")) {
             cmdline = val;
         } else if(!strcmp(arg, "--base")) {
-            unsigned base = strtoul(val, 0, 16);
-            hdr.kernel_addr =  base + 0x00008000;
-            hdr.ramdisk_addr = base + 0x01000000;
-            hdr.second_addr =  base + 0x00F00000;
-            hdr.tags_addr =    base + 0x00000100;
+            base = strtoul(val, 0, 16);
         } else if(!strcmp(arg, "--board")) {
             board = val;
+        } else if(!strcmp(arg,"--pagesize")) {
+            pagesize = strtoul(val, 0, 10);
+            if ((pagesize != 2048) && (pagesize != 4096)) {
+                fprintf(stderr,"error: unsupported page size %d\n", pagesize);
+                return -1;
+            }
+        } else if (!strcmp(arg, "--ramdisk_offset")) {
+            ramdisk_offset = strtoul(val, 0, 16);
+        } else if (!strcmp(arg, "-z")) {
+            compressed_kernel = 1;
+            argc++;
+            argv--;
         } else {
             return usage();
         }
     }
+    hdr.page_size = pagesize;
+
 
     if(bootimg == 0) {
         fprintf(stderr,"error: no output filename specified\n");
@@ -171,6 +219,15 @@ int main(int argc, char **argv)
     if(strlen(board) >= BOOT_NAME_SIZE) {
         fprintf(stderr,"error: board name too large\n");
         return usage();
+    }
+
+    hdr.second_addr =  base + 0x00F00000;
+    hdr.tags_addr =    base + 0x00000100;
+    hdr.ramdisk_addr = base + 0x00008000 + ramdisk_offset;
+    if(parse_log_addr(system_map) > 0)
+    {
+        hdr.log_buf_addr = parse_log_addr(system_map);
+        hdr.log_buf_magic = RESERVE_LOG_MAGIC;//ML,
     }
 
     strcpy(hdr.name, board);
@@ -199,6 +256,16 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+
+    if (compressed_kernel) {
+            /* put the compressed image after the ramdisk so that the
+               decompressor may run without having to relocate itself and
+               the compressed image */
+            hdr.kernel_addr = hdr.ramdisk_addr +
+                ROUND_TO_PAGE(hdr.ramdisk_size, (pagesize - 1));
+            hdr.kernel_addr = (hdr.kernel_addr + 4) & 0xfffffffc;
+    } else
+            hdr.kernel_addr = base + 0x00008000;
 
     if(second_fn) {
         second_data = load_file(second_fn, &hdr.second_size);
