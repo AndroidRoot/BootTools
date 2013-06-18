@@ -23,6 +23,7 @@ mkbootimg: mkbootimg.o sha.o $(COMMON) $(DEPS)
 	$(CC) $(CFLAGS) -o mkbootimg mkbootimg.o sha.o $(COMMON) $(LDFLAGS)
 
 install: $(TARGETS)
+	install -d -m 0755 $(DESTDIR)/$(PREFIX)/bin
 	install -D -m 0755 $(TARGETS) $(DESTDIR)/$(PREFIX)/bin
 
 $(OBJS): %.o: src/%.c $(DEPS)
