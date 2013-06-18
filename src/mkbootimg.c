@@ -112,7 +112,7 @@ int parse_log_addr(char *filename)
    if(fp==NULL)
        return -1;
    while ((fgets (buffer, 100, fp)) != NULL){
-       if( p =strstr(buffer, subs)){
+       if( (p =strstr(buffer, subs))){
            found = 1;
            break;
        }
@@ -148,7 +148,7 @@ int main(int argc, char **argv)
     unsigned pagesize = 2048;
     int fd;
     SHA_CTX ctx;
-    uint8_t* sha;
+    const uint8_t* sha;
     unsigned base = 0x10000000;
     unsigned ramdisk_offset = 0x01300000;
     int compressed_kernel = 0;
@@ -230,7 +230,7 @@ int main(int argc, char **argv)
         hdr.log_buf_magic = RESERVE_LOG_MAGIC;//ML,
     }
 
-    strcpy(hdr.name, board);
+    strcpy((char*)hdr.name, board);
 
     memcpy(hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
 
